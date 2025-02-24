@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Podcast Sync Player</title>
+  <!-- Material Components for the Web CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css">
+  <style>
+    body {
+      font-family: Roboto, sans-serif;
+      margin: 0;
+      background-color: #f5f5f5;
+    }
+    header {
+      background-color: #6200ee;
+      color: white;
+      padding: 16px;
+      text-align: center;
+    }
+    main {
+      padding: 16px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .mdc-card {
+      margin-bottom: 16px;
+      padding: 16px;
+      border-radius: 8px;
+    }
+    .episode-item {
+      cursor: pointer;
+      padding: 8px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .episode-item:hover {
+      background-color: #e8eaf6;
+    }
+    .pagination-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 8px;
+    }
+    /* Spotify-like player styling */
+    .player-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .player-info img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .player-details h3 {
+      margin: 0;
+      font-size: 1.25rem;
+      line-height: 1.2;
+    }
+    .player-details p {
+      margin: 4px 0 0;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Podcast Sync Player</h1>
+  </header>
+  <main>
+    <!-- Room Controls -->
+    <div class="mdc-card room-controls">
+      <h2 class="mdc-typography--headline6">Room</h2>
+      <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
+        <button class="mdc-button mdc-button--raised" id="createRoomBtn">
+          <span class="mdc-button__label">Create Room</span>
+        </button>
+        <div class="mdc-text-field mdc-text-field--outlined" style="flex-grow: 1;">
+          <input type="text" id="joinRoomInput" class="mdc-text-field__input">
+          <div class="mdc-notched-outline">
+            <div class="mdc-notched-outline__leading"></div>
+            <div class="mdc-notched-outline__notch">
+              <span class="mdc-floating-label">Room ID</span>
+            </div>
+            <div class="mdc-notched-outline__trailing"></div>
+          </div>
+        </div>
+        <button class="mdc-button mdc-button--raised" id="joinRoomBtn">
+          <span class="mdc-button__label">Join Room</span>
+        </button>
+      </div>
+      <div id="currentRoomDisplay" style="margin-top: 8px;"></div>
+    </div>
+    
+    <!-- Feed Controls -->
+    <div class="mdc-card feed-controls">
+      <h2 class="mdc-typography--headline6">Podcast Feed</h2>
+      <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
+        <div class="mdc-text-field mdc-text-field--outlined" style="flex-grow: 1;">
+          <input type="text" id="rssUrl" class="mdc-text-field__input">
+          <div class="mdc-notched-outline">
+            <div class="mdc-notched-outline__leading"></div>
+            <div class="mdc-notched-outline__notch">
+              <span class="mdc-floating-label">RSS Feed URL</span>
+            </div>
+            <div class="mdc-notched-outline__trailing"></div>
+          </div>
+        </div>
+        <button class="mdc-button mdc-button--raised" id="loadFeedBtn">
+          <span class="mdc-button__label">Load Podcast</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Episodes List -->
+    <div class="mdc-card episodes-section">
+      <h2 class="mdc-typography--headline6">Episodes</h2>
+      <div id="episodeList" style="max-height: 300px; overflow-y: auto;"></div>
+      <div class="pagination-controls">
+        <button class="mdc-button mdc-button--outlined" id="prevBtn">
+          <span class="mdc-button__label">Previous</span>
+        </button>
+        <span id="pageIndicator"></span>
+        <button class="mdc-button mdc-button--outlined" id="nextBtn">
+          <span class="mdc-button__label">Next</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Player Section (Spotify-like) -->
+    <div class="mdc-card player-section">
+      <div class="player-info">
+        <!-- Initially, no artwork is shown -->
+        <img id="podcastArt" style="display: none;" alt="Podcast Art">
+        <div class="player-details">
+          <h3 id="episodeTitle">Episode Title</h3>
+          <p id="podcastTitle">Podcast Name</p>
+        </div>
+      </div>
+      <!-- Native audio element with controls -->
+      <audio id="audioPlayer" controls style="width: 100%;"></audio>
+    </div>
+  </main>
+  
+  <!-- Material Components Web JS -->
+  <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+  <!-- Socket.IO Library -->
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    // Initialize Material Components
+    mdc.autoInit();
+    
+    const socket = io('http://localhost:3000');
+    let currentRoom = null;
+    const audioPlayer = document.getElementById('audioPlayer');
+    const currentRoomDisplay = document.getElementById('currentRoomDisplay');
+    
+    // Player metadata elements
+    const podcastArt = document.getElementById('podcastArt');
+    const episodeTitleEl = document.getElementById('episodeTitle');
+    const podcastTitleEl = document.getElementById('podcastTitle');
+    
+    let allEpisodes = [];
+    let currentPage = 0;
+    const episodesPerPage = 10;
+    
+    // Variables to store channel-level metadata
+    let currentFeedTitle = "";
+    let currentFeedImage = "";
+    
+    // Flag to suppress outgoing sync events when updating from remote changes
+    let suppressSync = false;
+    
+    // --- Room Controls ---
+    document.getElementById('createRoomBtn').addEventListener('click', () => {
+      const roomId = 'room-' + Math.random().toString(36).substr(2, 8);
+      currentRoom = roomId;
+      socket.emit('joinRoom', roomId);
+      currentRoomDisplay.textContent = `Created and joined room: ${roomId}`;
+      console.log('Created and joined room:', roomId);
+    });
+    
+    document.getElementById('joinRoomBtn').addEventListener('click', () => {
+      const roomId = document.getElementById('joinRoomInput').value.trim();
+      if (roomId) {
+        currentRoom = roomId;
+        socket.emit('joinRoom', roomId);
+        currentRoomDisplay.textContent = `Joined room: ${roomId}`;
+        console.log('Joined room:', roomId);
+      } else {
+        alert("Please enter a valid room ID.");
+      }
+    });
+    
+    // --- Feed Controls ---
+    document.getElementById('loadFeedBtn').addEventListener('click', async () => {
+      const rssUrl = document.getElementById('rssUrl').value;
+      if (!rssUrl) return alert("Please enter a valid RSS feed URL.");
+      
+      try {
+        const response = await fetch(`/feed?url=${encodeURIComponent(rssUrl)}`);
+        if (!response.ok) throw new Error("Failed to fetch the feed.");
+        const feedData = await response.json();
+        // Store channel-level metadata
+        currentFeedTitle = feedData.title || "";
+        currentFeedImage = feedData.image.url;
+        // if (feedData.itunesImage) {
+        //   if (typeof feedData.itunesImage === 'object' && feedData.itunesImage.href) {
+        //     currentFeedImage = feedData.itunesImage.href;
+        //   } else if (typeof feedData.itunesImage === 'string') {
+        //     currentFeedImage = feedData.itunesImage;
+        //   }
+        // }
+        allEpisodes = feedData.items || [];
+        currentPage = 0;
+        displayEpisodesPage();
+        updatePageIndicator();
+      } catch (error) {
+        console.error("Error fetching RSS feed:", error);
+        alert("Error loading feed. Check the console for details.");
+      }
+    });
+    
+    function displayEpisodesPage() {
+      const episodeList = document.getElementById('episodeList');
+      episodeList.innerHTML = '';
+      const start = currentPage * episodesPerPage;
+      const end = Math.min(start + episodesPerPage, allEpisodes.length);
+      for (let i = start; i < end; i++) {
+        const episode = allEpisodes[i];
+        const div = document.createElement('div');
+        div.className = 'episode-item';
+        div.textContent = episode.title;
+        div.addEventListener('click', () => {
+          if (episode.enclosure && episode.enclosure.url) {
+            // Set audio source and load episode
+            audioPlayer.src = episode.enclosure.url;
+            audioPlayer.load();
+            console.log(`Loaded episode: ${episode.title}`);
+            // Determine image URL: use episode's itunesImage if available, otherwise fall back to channel image.
+            let imageUrl = currentFeedImage; // May be empty if not provided.
+            if (episode.itunesImage) {
+              if (typeof episode.itunesImage === 'object' && episode.itunesImage.href) {
+                imageUrl = episode.itunesImage.href;
+              } else if (typeof episode.itunesImage === 'string') {
+                imageUrl = episode.itunesImage;
+              }
+            }
+            // Update player UI metadata
+            if (imageUrl) {
+              podcastArt.src = imageUrl;
+              podcastArt.style.display = 'block';
+            } else {
+              podcastArt.style.display = 'none';
+            }
+            episodeTitleEl.textContent = episode.title;
+            podcastTitleEl.textContent = currentFeedTitle;
+            // Emit episode change event to sync with others in the room
+            if (currentRoom) {
+              socket.emit('episodeChange', {
+                room: currentRoom,
+                episodeUrl: episode.enclosure.url,
+                title: episode.title,
+                podcastTitle: currentFeedTitle,
+                imageUrl: imageUrl,
+                currentTime: 0,
+                playing: false
+              });
+            }
+          } else {
+            alert("No audio URL found for this episode.");
+          }
+        });
+        episodeList.appendChild(div);
+      }
+    }
+    
+    function updatePageIndicator() {
+      const pageIndicator = document.getElementById('pageIndicator');
+      const totalPages = Math.ceil(allEpisodes.length / episodesPerPage);
+      pageIndicator.textContent = `Page ${currentPage + 1} of ${totalPages}`;
+    }
+    
+    document.getElementById('prevBtn').addEventListener('click', () => {
+      if (currentPage > 0) {
+        currentPage--;
+        displayEpisodesPage();
+        updatePageIndicator();
+      }
+    });
+    
+    document.getElementById('nextBtn').addEventListener('click', () => {
+      if ((currentPage + 1) * episodesPerPage < allEpisodes.length) {
+        currentPage++;
+        displayEpisodesPage();
+        updatePageIndicator();
+      }
+    });
+    
+    // --- Audio Player Native Event Listeners for Syncing ---
+    audioPlayer.addEventListener('play', () => {
+      if (!suppressSync && currentRoom) {
+        socket.emit('play', { room: currentRoom, currentTime: audioPlayer.currentTime });
+      }
+    });
+    
+    audioPlayer.addEventListener('pause', () => {
+      if (!suppressSync && currentRoom) {
+        socket.emit('pause', { room: currentRoom, currentTime: audioPlayer.currentTime });
+      }
+    });
+    
+    audioPlayer.addEventListener('seeked', () => {
+      if (!suppressSync && currentRoom) {
+        socket.emit('seek', { room: currentRoom, currentTime: audioPlayer.currentTime });
+      }
+    });
+    
+    // --- Socket Event Handlers ---
+    socket.on('play', (data) => {
+      console.log('Received play event', data);
+      if (Math.abs(audioPlayer.currentTime - data.currentTime) > 0.5) {
+        suppressSync = true;
+        audioPlayer.currentTime = data.currentTime;
+        setTimeout(() => { suppressSync = false; }, 50);
+      }
+      suppressSync = true;
+      audioPlayer.play();
+      setTimeout(() => { suppressSync = false; }, 50);
+    });
+    
+    socket.on('pause', (data) => {
+      console.log('Received pause event', data);
+      suppressSync = true;
+      audioPlayer.pause();
+      audioPlayer.currentTime = data.currentTime;
+      setTimeout(() => { suppressSync = false; }, 50);
+    });
+    
+    socket.on('seek', (data) => {
+      console.log('Received seek event', data);
+      suppressSync = true;
+      audioPlayer.currentTime = data.currentTime;
+      setTimeout(() => { suppressSync = false; }, 50);
+    });
+    
+    socket.on('episodeChange', (data) => {
+      console.log('Received episode change event:', data);
+      if (audioPlayer.src !== data.episodeUrl) {
+        audioPlayer.src = data.episodeUrl;
+        audioPlayer.load();
+      }
+      audioPlayer.currentTime = data.currentTime;
+      if (data.imageUrl) {
+        podcastArt.src = data.imageUrl;
+        podcastArt.style.display = 'block';
+      } else {
+        podcastArt.style.display = 'none';
+      }
+      episodeTitleEl.textContent = data.title || "Episode Title";
+      podcastTitleEl.textContent = data.podcastTitle || "";
+      if (data.playing) {
+        audioPlayer.play();
+      } else {
+        audioPlayer.pause();
+      }
+    });
+    
+    socket.on('currentState', (data) => {
+      console.log('Received current state:', data);
+      if (data.episodeUrl) {
+        audioPlayer.src = data.episodeUrl;
+        audioPlayer.load();
+        audioPlayer.currentTime = data.currentTime;
+        if (data.imageUrl) {
+          podcastArt.src = data.imageUrl;
+          podcastArt.style.display = 'block';
+        } else {
+          podcastArt.style.display = 'none';
+        }
+        episodeTitleEl.textContent = data.title || "Episode Title";
+        podcastTitleEl.textContent = data.podcastTitle || "";
+        if (data.playing) {
+          audioPlayer.play();
+        } else {
+          audioPlayer.pause();
+        }
+      }
+    });
+  </script>
+</body>
+</html>
