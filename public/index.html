@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Podcast Sync Player</title>
+  <title>PodParty</title>
   <!-- Material Components for the Web CSS -->
   <link rel="stylesheet" href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css">
   <style>
@@ -240,7 +240,7 @@
             audioPlayer.load();
             console.log(`Loaded episode: ${episode.title}`);
             // Determine image URL: use episode's itunesImage if available, otherwise fall back to channel image.
-            let imageUrl = currentFeedImage; // May be empty if not provided.
+            let imageUrl = currentFeedImage;
             if (episode.itunesImage) {
               if (typeof episode.itunesImage === 'object' && episode.itunesImage.href) {
                 imageUrl = episode.itunesImage.href;
