@@ -152,7 +152,7 @@
     // Initialize Material Components
     mdc.autoInit();
     
-    const socket = io('http://localhost:3000');
+    const socket = io();
     let currentRoom = null;
     const audioPlayer = document.getElementById('audioPlayer');
     const currentRoomDisplay = document.getElementById('currentRoomDisplay');
